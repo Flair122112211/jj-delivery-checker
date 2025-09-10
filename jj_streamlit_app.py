@@ -11,13 +11,11 @@ st.set_page_config(page_title="Jimmy John's Verified Delivery Checker", layout="
 st.title("Jimmy John's Verified Delivery Checker")
 st.markdown("Enter a Jimmy John's store address. Only addresses **actually deliverable** will be shown.")
 
-# Input
 store_address = st.text_input(
     "Enter Jimmy John's store address:",
     "1175 Woods Crossing Rd, Greenville, SC 29607"
 )
 
-# Filter categories
 category_filter = st.multiselect(
     "Filter by Category",
     options=[
@@ -65,8 +63,6 @@ if st.button("Run Verified Analysis"):
         elements = []
         for el in data["elements"]:
             tags = el.get("tags", {})
-
-            # Broad category assignment
             if tags.get("healthcare") or tags.get("amenity") in ["hospital","clinic","pharmacy","dentist"]:
                 category = "Medical"
             elif tags.get("amenity") in ["restaurant","fast_food","cafe","bar","bakery"]:
@@ -95,40 +91,31 @@ if st.button("Run Verified Analysis"):
 
         st.info("Verifying delivery with Jimmy John's website...")
         verified_addresses = []
-        
-        # Setup headless Chrome for Selenium
+
         chrome_options = Options()
         chrome_options.add_argument("--headless")
-        driver = webdriver.Chrome(options=chrome_options)
+        driver = webdriver.Chrome(executable_path="./drivers/chromedriver", options=chrome_options)
 
         for idx, row in df.iterrows():
             try:
-                # Open JJ order page
                 driver.get("https://www.jimmyjohns.com/order")
                 time.sleep(2)
-                # Enter store location for delivery
-                search_box = driver.find_element(By.ID, "zip-input")  # might need updating if JJ changes page
+                search_box = driver.find_element(By.ID, "zip-input")
                 search_box.clear()
                 search_box.send_keys(row["Address"])
                 search_box.submit()
                 time.sleep(2)
-                
-                # Check if deliverable (simplified logic)
                 if "We deliver to" in driver.page_source or "Enter your address" not in driver.page_source:
                     verified_addresses.append(row)
-            except Exception as e:
+            except Exception:
                 continue
 
         driver.quit()
         df_verified = pd.DataFrame(verified_addresses)
-
-        # Apply category filter
         df_filtered = df_verified[df_verified["Category"].isin(category_filter)]
         st.success(f"Found {len(df_filtered)} verified deliverable establishments.")
-
         st.dataframe(df_filtered)
 
-        # CSV download
         csv = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
             "Download Verified Results CSV",
