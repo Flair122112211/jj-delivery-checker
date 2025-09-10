@@ -7,11 +7,10 @@ st.set_page_config(page_title="Jimmy John's Delivery Checker", layout="wide")
 
 st.title("Jimmy John's Delivery Checker")
 st.markdown(
-    "Enter a Jimmy John's store address to find all establishments in the delivery area. "
-    "Results will show directly in the app."
+    "Enter a Jimmy John's store address to find establishments in the delivery area. "
+    "Filter by broad categories and download the results if needed."
 )
 
-# Input for store address
 store_address = st.text_input(
     "Enter Jimmy John's store address:",
     "1175 Woods Crossing Rd, Greenville, SC 29607"
@@ -50,33 +49,70 @@ if st.button("Run Analysis"):
 
         elements = []
         for el in data["elements"]:
+            tags = el.get("tags", {})
+
+            # Broad categories
+            if tags.get("healthcare") or tags.get("amenity") in ["hospital", "clinic", "pharmacy", "dentist"]:
+                category = "Medical"
+            elif tags.get("amenity") in ["restaurant", "fast_food", "cafe", "bar", "bakery"]:
+                category = "Food / Restaurants"
+            elif tags.get("shop") or tags.get("amenity") in ["marketplace"]:
+                category = "Retail / Shops"
+            elif tags.get("car_dealer") or tags.get("amenity") in ["fuel", "car_repair"]:
+                category = "Car / Automotive"
+            elif tags.get("amenity") in ["school", "college", "library", "kindergarten"]:
+                category = "Education / Schools"
+            elif tags.get("amenity") in ["cinema", "theatre", "gym", "nightclub", "bar"]:
+                category = "Entertainment / Leisure"
+            elif tags.get("building") in ["apartments", "residential"]:
+                category = "Residential"
+            else:
+                category = "Other"
+
             info = {
-                "Name": el.get("tags", {}).get("name", ""),
+                "Name": tags.get("name", ""),
                 "Address": " ".join(filter(None, [
-                    el.get("tags", {}).get("addr:housenumber", ""),
-                    el.get("tags", {}).get("addr:street", ""),
-                    el.get("tags", {}).get("addr:city", "")
+                    tags.get("addr:housenumber", ""),
+                    tags.get("addr:street", ""),
+                    tags.get("addr:city", "")
                 ])),
-                "Type": el.get("tags", {}).get("shop") or
-                        el.get("tags", {}).get("office") or
-                        el.get("tags", {}).get("amenity") or
-                        el.get("tags", {}).get("healthcare") or
-                        el.get("tags", {}).get("car_dealer") or
-                        el.get("tags", {}).get("building", "")
+                "Category": category
             }
             elements.append(info)
 
         df = pd.DataFrame(elements)
         st.success(f"Found {len(df)} establishments nearby.")
 
-        # Optional: filter by type
-        type_filter = st.multiselect(
-            "Filter by type",
-            options=df["Type"].dropna().unique().tolist()
+        # Filter by category
+        category_filter = st.multiselect(
+            "Filter by Category",
+            options=[
+                "Medical",
+                "Food / Restaurants",
+                "Retail / Shops",
+                "Car / Automotive",
+                "Education / Schools",
+                "Entertainment / Leisure",
+                "Residential",
+                "Other"
+            ],
+            default=[
+                "Medical",
+                "Food / Restaurants",
+                "Retail / Shops",
+                "Car / Automotive"
+            ]
         )
-        if type_filter:
-            df_filtered = df[df["Type"].isin(type_filter)]
-            st.dataframe(df_filtered)
-        else:
-            st.dataframe(df)
+        df_filtered = df[df["Category"].isin(category_filter)]
+        st.dataframe(df_filtered)
+
+        # Download CSV
+        csv = df_filtered.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "Download Filtered Results as CSV",
+            data=csv,
+            file_name="jj_delivery_establishments.csv",
+            mime="text/csv"
+        )
+
 
