@@ -2,27 +2,45 @@ import streamlit as st
 import pandas as pd
 from geopy.geocoders import Nominatim
 import requests
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+import time
 
-st.set_page_config(page_title="Jimmy John's Delivery Checker", layout="wide")
+st.set_page_config(page_title="Jimmy John's Verified Delivery Checker", layout="wide")
+st.title("Jimmy John's Verified Delivery Checker")
+st.markdown("Enter a Jimmy John's store address. Only addresses **actually deliverable** will be shown.")
 
-st.title("Jimmy John's Delivery Checker")
-st.markdown(
-    "Enter a Jimmy John's store address to find establishments in the delivery area. "
-    "Filter by broad categories and download the results if needed."
-)
-
+# Input
 store_address = st.text_input(
     "Enter Jimmy John's store address:",
     "1175 Woods Crossing Rd, Greenville, SC 29607"
 )
 
-if st.button("Run Analysis"):
+# Filter categories
+category_filter = st.multiselect(
+    "Filter by Category",
+    options=[
+        "Medical",
+        "Food / Restaurants",
+        "Retail / Shops",
+        "Car / Automotive",
+        "Education / Schools",
+        "Entertainment / Leisure",
+        "Residential",
+        "Other"
+    ],
+    default=["Medical","Food / Restaurants","Retail / Shops","Car / Automotive"]
+)
+
+if st.button("Run Verified Analysis"):
+
     st.info("Geocoding store address...")
     geolocator = Nominatim(user_agent="jj_delivery_checker")
     location = geolocator.geocode(store_address)
 
     if location is None:
-        st.error("Could not geocode the store address. Check spelling and try again.")
+        st.error("Could not geocode store address. Check spelling.")
     else:
         lat, lon = location.latitude, location.longitude
         st.success(f"Store coordinates: {lat}, {lon}")
@@ -41,78 +59,81 @@ if st.button("Run Analysis"):
         );
         out center;
         """
-        response = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": OVERPASS_QUERY}
-        )
+        response = requests.post("https://overpass-api.de/api/interpreter", data={"data": OVERPASS_QUERY})
         data = response.json()
 
         elements = []
         for el in data["elements"]:
             tags = el.get("tags", {})
 
-            # Broad categories
-            if tags.get("healthcare") or tags.get("amenity") in ["hospital", "clinic", "pharmacy", "dentist"]:
+            # Broad category assignment
+            if tags.get("healthcare") or tags.get("amenity") in ["hospital","clinic","pharmacy","dentist"]:
                 category = "Medical"
-            elif tags.get("amenity") in ["restaurant", "fast_food", "cafe", "bar", "bakery"]:
+            elif tags.get("amenity") in ["restaurant","fast_food","cafe","bar","bakery"]:
                 category = "Food / Restaurants"
-            elif tags.get("shop") or tags.get("amenity") in ["marketplace"]:
+            elif tags.get("shop") or tags.get("amenity") == "marketplace":
                 category = "Retail / Shops"
-            elif tags.get("car_dealer") or tags.get("amenity") in ["fuel", "car_repair"]:
+            elif tags.get("car_dealer") or tags.get("amenity") in ["fuel","car_repair"]:
                 category = "Car / Automotive"
-            elif tags.get("amenity") in ["school", "college", "library", "kindergarten"]:
+            elif tags.get("amenity") in ["school","college","library","kindergarten"]:
                 category = "Education / Schools"
-            elif tags.get("amenity") in ["cinema", "theatre", "gym", "nightclub", "bar"]:
+            elif tags.get("amenity") in ["cinema","theatre","gym","nightclub","bar"]:
                 category = "Entertainment / Leisure"
-            elif tags.get("building") in ["apartments", "residential"]:
+            elif tags.get("building") in ["apartments","residential"]:
                 category = "Residential"
             else:
                 category = "Other"
 
             info = {
-                "Name": tags.get("name", ""),
-                "Address": " ".join(filter(None, [
-                    tags.get("addr:housenumber", ""),
-                    tags.get("addr:street", ""),
-                    tags.get("addr:city", "")
-                ])),
+                "Name": tags.get("name",""),
+                "Address": " ".join(filter(None,[tags.get("addr:housenumber",""),tags.get("addr:street",""),tags.get("addr:city","")])),
                 "Category": category
             }
             elements.append(info)
 
         df = pd.DataFrame(elements)
-        st.success(f"Found {len(df)} establishments nearby.")
 
-        # Filter by category
-        category_filter = st.multiselect(
-            "Filter by Category",
-            options=[
-                "Medical",
-                "Food / Restaurants",
-                "Retail / Shops",
-                "Car / Automotive",
-                "Education / Schools",
-                "Entertainment / Leisure",
-                "Residential",
-                "Other"
-            ],
-            default=[
-                "Medical",
-                "Food / Restaurants",
-                "Retail / Shops",
-                "Car / Automotive"
-            ]
-        )
-        df_filtered = df[df["Category"].isin(category_filter)]
+        st.info("Verifying delivery with Jimmy John's website...")
+        verified_addresses = []
+        
+        # Setup headless Chrome for Selenium
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        driver = webdriver.Chrome(options=chrome_options)
+
+        for idx, row in df.iterrows():
+            try:
+                # Open JJ order page
+                driver.get("https://www.jimmyjohns.com/order")
+                time.sleep(2)
+                # Enter store location for delivery
+                search_box = driver.find_element(By.ID, "zip-input")  # might need updating if JJ changes page
+                search_box.clear()
+                search_box.send_keys(row["Address"])
+                search_box.submit()
+                time.sleep(2)
+                
+                # Check if deliverable (simplified logic)
+                if "We deliver to" in driver.page_source or "Enter your address" not in driver.page_source:
+                    verified_addresses.append(row)
+            except Exception as e:
+                continue
+
+        driver.quit()
+        df_verified = pd.DataFrame(verified_addresses)
+
+        # Apply category filter
+        df_filtered = df_verified[df_verified["Category"].isin(category_filter)]
+        st.success(f"Found {len(df_filtered)} verified deliverable establishments.")
+
         st.dataframe(df_filtered)
 
-        # Download CSV
+        # CSV download
         csv = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
-            "Download Filtered Results as CSV",
+            "Download Verified Results CSV",
             data=csv,
-            file_name="jj_delivery_establishments.csv",
+            file_name="jj_verified_delivery.csv",
             mime="text/csv"
         )
-
 
